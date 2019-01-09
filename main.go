@@ -52,6 +52,21 @@ func authenticateClient(clientID, clientSecret string) *http.Client {
 	return config.Client(ctx, accesstoken)
 }
 
+func findMedia() (media []string, err error) {
+	thisDir, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	err = filepath.Walk(thisDir, func(path string, info os.FileInfo, err error) error {
+		if !info.IsDir() {
+			// TODO: restrict file types
+			media = append(media, path)
+		}
+		return nil
+	})
+	return
+}
+
 func main() {
 	fmt.Println("Starting... ")
 
@@ -67,18 +82,13 @@ func main() {
 	}
 
 	// find files
-	var images []string
-	thisDir, _ := os.Getwd()
-	walkFunc := func(path string, info os.FileInfo, err error) error {
-		if !info.IsDir() {
-			images = append(images, path)
-		}
-		return nil
+	mediaFiles, err := findMedia()
+	if err != nil {
+		log.Fatal(err)
 	}
-	_ = filepath.Walk(thisDir, walkFunc)
 
 	// upload files
-	for _, image := range images {
+	for _, image := range mediaFiles {
 		// prep file
 		fileName := path.Base(image)
 		file, err := os.Open(image)
