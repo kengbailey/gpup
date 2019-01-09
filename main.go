@@ -17,13 +17,7 @@ import (
 	photoslibrary "google.golang.org/api/photoslibrary/v1"
 )
 
-func main() {
-	fmt.Println("Starting... ")
-
-	// get login creds
-	clientID := os.Getenv("GPHOTOS_CLIENTID")
-	clientSecret := os.Getenv("GPHOTOS_CLIENTSECRET")
-
+func authenticateClient(clientID, clientSecret string) *http.Client {
 	// create new o-auth client
 	ctx := context.Background()
 	config := &oauth2.Config{
@@ -33,7 +27,6 @@ func main() {
 		Scopes:       []string{photoslibrary.PhotoslibraryScope},
 		RedirectURL:  "urn:ietf:wg:oauth:2.0:oob",
 	}
-
 	var n uint64
 	err := binary.Read(rand.Reader, binary.LittleEndian, &n)
 	if err != nil {
@@ -41,9 +34,11 @@ func main() {
 	}
 	state := fmt.Sprintf("%x", n)
 
+	// prompt user to authenticate
 	authCodeURL := config.AuthCodeURL(state)
 	fmt.Printf("Authenticate --> %s\n\n", authCodeURL)
 
+	// verify code and get http.Client
 	var authCode string
 	fmt.Print("Enter code: ")
 	_, err = fmt.Scanln(&authCode)
@@ -54,10 +49,19 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	photoClient := config.Client(ctx, accesstoken)
+	return config.Client(ctx, accesstoken)
+}
+
+func main() {
+	fmt.Println("Starting... ")
+
+	// authenticate
+	clientID := os.Getenv("GPHOTOS_CLIENTID")
+	clientSecret := os.Getenv("GPHOTOS_CLIENTSECRET")
+	photoClient := authenticateClient(clientID, clientSecret)
 
 	// create new photos helper
-	photos, err := photoslibrary.New(photoClient)
+	photoService, err := photoslibrary.New(photoClient)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -106,7 +110,7 @@ func main() {
 		token := string(out2)
 
 		// attach file to library via token
-		batch := photos.MediaItems.BatchCreate(&photoslibrary.BatchCreateMediaItemsRequest{
+		batch := photoService.MediaItems.BatchCreate(&photoslibrary.BatchCreateMediaItemsRequest{
 			NewMediaItems: []*photoslibrary.NewMediaItem{
 				&photoslibrary.NewMediaItem{
 					Description:     fileName,
