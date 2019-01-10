@@ -60,7 +60,7 @@ func findMedia() (media []string, err error) {
 	}
 	err = filepath.Walk(thisDir, func(path string, info os.FileInfo, err error) error {
 		if !info.IsDir() {
-			// TODO: restrict file types
+			// TODO: restrict file types; path.Ext()
 			media = append(media, path)
 		}
 		return nil
@@ -76,7 +76,7 @@ func main() {
 	clientSecret := os.Getenv("GPHOTOS_CLIENTSECRET")
 	photoClient := authenticateClient(clientID, clientSecret)
 
-	// create new photos helper
+	// create new photo service
 	photoService, err := photoslibrary.New(photoClient)
 	if err != nil {
 		log.Fatal(err)
@@ -89,8 +89,9 @@ func main() {
 	}
 
 	// upload files
+	// TODO: do this concurrently; multiple (1) w/ single (2)
 	for _, filePath := range mediaFiles {
-		// prep file
+		// 0. prep file
 		fileName := path.Base(filePath)
 		file, err := os.Open(filePath)
 		if err != nil {
@@ -98,7 +99,7 @@ func main() {
 		}
 		defer file.Close()
 
-		// upload file, get token
+		// 1. upload file, get token
 		req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/uploads", uploadURL, apiVersion), file)
 		if err != nil {
 			log.Fatal(err)
@@ -118,7 +119,7 @@ func main() {
 		}
 		token := string(out2)
 
-		// attach file to library via token
+		// 2. attach file to library via token
 		batch := photoService.MediaItems.BatchCreate(&photoslibrary.BatchCreateMediaItemsRequest{
 			NewMediaItems: []*photoslibrary.NewMediaItem{
 				&photoslibrary.NewMediaItem{
@@ -131,6 +132,8 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		// TODO: status code error checking
+		// TODO: print new media item results
 		fmt.Println(response.HTTPStatusCode)
 		// for _, x := range response.NewMediaItemResults {
 		// 	fmt.Printf("Added %s as %s", x.MediaItem.Description, x.MediaItem.Id)
