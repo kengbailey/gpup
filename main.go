@@ -2,11 +2,10 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/binary"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"path"
@@ -17,9 +16,14 @@ import (
 	photoslibrary "google.golang.org/api/photoslibrary/v1"
 )
 
+const (
+	uploadURL  string = "https://photoslibrary.googleapis.com/"
+	apiVersion string = "v1"
+)
+
+// authenticateClient ...
 func authenticateClient(clientID, clientSecret string) *http.Client {
-	// create new o-auth client
-	ctx := context.Background()
+	// create new oauth2 config
 	config := &oauth2.Config{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
@@ -27,24 +31,20 @@ func authenticateClient(clientID, clientSecret string) *http.Client {
 		Scopes:       []string{photoslibrary.PhotoslibraryScope},
 		RedirectURL:  "urn:ietf:wg:oauth:2.0:oob",
 	}
-	var n uint64
-	err := binary.Read(rand.Reader, binary.LittleEndian, &n)
-	if err != nil {
-		log.Fatal(err)
-	}
-	state := fmt.Sprintf("%x", n)
 
 	// prompt user to authenticate
-	authCodeURL := config.AuthCodeURL(state)
+	stateToken := fmt.Sprintf("%x", rand.Uint64())
+	authCodeURL := config.AuthCodeURL(stateToken)
 	fmt.Printf("Authenticate --> %s\n\n", authCodeURL)
 
 	// verify code and get http.Client
 	var authCode string
 	fmt.Print("Enter code: ")
-	_, err = fmt.Scanln(&authCode)
+	_, err := fmt.Scanln(&authCode)
 	if err != nil {
 		log.Fatal(err)
 	}
+	ctx := context.Background()
 	accesstoken, err := config.Exchange(ctx, authCode)
 	if err != nil {
 		log.Fatal(err)
@@ -52,6 +52,7 @@ func authenticateClient(clientID, clientSecret string) *http.Client {
 	return config.Client(ctx, accesstoken)
 }
 
+// findMedia ...
 func findMedia() (media []string, err error) {
 	thisDir, err := os.Getwd()
 	if err != nil {
@@ -88,19 +89,17 @@ func main() {
 	}
 
 	// upload files
-	for _, image := range mediaFiles {
+	for _, filePath := range mediaFiles {
 		// prep file
-		fileName := path.Base(image)
-		file, err := os.Open(image)
+		fileName := path.Base(filePath)
+		file, err := os.Open(filePath)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer file.Close()
 
 		// upload file, get token
-		api := "v1"
-		url := "https://photoslibrary.googleapis.com/"
-		req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/uploads", url, api), file)
+		req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/uploads", uploadURL, apiVersion), file)
 		if err != nil {
 			log.Fatal(err)
 		}
