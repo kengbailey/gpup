@@ -60,11 +60,14 @@ func findMedia() (media []string, err error) {
 	}
 	err = filepath.Walk(thisDir, func(path string, info os.FileInfo, err error) error {
 		if !info.IsDir() {
-			// TODO: restrict file types; path.Ext()
+			// TODO: restrict file types; path.Ext() --> https://support.google.com/photos/thread/245420?hl=en
 			media = append(media, path)
 		}
 		return nil
 	})
+	if err != nil {
+		return
+	}
 	return
 }
 
@@ -72,6 +75,7 @@ func main() {
 	fmt.Println("Starting... ")
 
 	// authenticate
+	// TODO: check for args; print message if empty
 	clientID := os.Getenv("GPHOTOS_CLIENTID")
 	clientSecret := os.Getenv("GPHOTOS_CLIENTSECRET")
 	photoClient := authenticateClient(clientID, clientSecret)
