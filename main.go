@@ -44,30 +44,32 @@ type MediaResult struct {
 }
 
 // UploadMediaFile ...
-func UploadMediaFile(file *os.File, photoClient *http.Client) MediaUpload {
+func UploadMediaFile(file *os.File, photoClient *http.Client) (upload MediaUpload, err error) {
 	// 1. upload file, get token
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/uploads", uploadURL, apiVersion), file)
 	if err != nil {
-		log.Fatal(err)
+		return upload, fmt.Errorf("Failed to create new POST Request for File: %s --> %s", file.Name(), err.Error())
 	}
 	req.Header.Add("Content-type", " application/octet-stream")
 	req.Header.Add("X-Goog-Upload-File-Name", path.Base(file.Name()))
 	req.Header.Add("X-Goog-Upload-Protocol", "raw")
 	out, err := photoClient.Do(req)
 	if err != nil {
-		log.Fatal(err)
+		return upload, fmt.Errorf("Failed to POST File: %s --> %s", file.Name(), err.Error())
 	}
 	defer out.Body.Close()
+	defer file.Close()
 
 	out2, err := ioutil.ReadAll(out.Body)
 	if err != nil {
-		log.Fatal(err)
+		return upload, fmt.Errorf("Failed to read POST response body for file: %s --> %s", file.Name(), err.Error())
 	}
 	fmt.Println("File uploaded: " + file.Name())
-	return MediaUpload{
+	upload = MediaUpload{
 		name:        path.Base(file.Name()),
 		uploadToken: string(out2),
 	}
+	return
 }
 
 // AttachMediaUpload ...
@@ -125,7 +127,6 @@ func FindMedia() (media []*os.File, err error) {
 			log.Fatal(err)
 		}
 		media = append(media, file)
-		//file.Close()
 	}
 	return
 }
@@ -133,7 +134,11 @@ func FindMedia() (media []*os.File, err error) {
 // worker ...
 func worker(wg *sync.WaitGroup, photoClient *http.Client, photoService *photoslibrary.Service) {
 	for file := range jobs {
-		upload := UploadMediaFile(file, photoClient)
+		upload, err := UploadMediaFile(file, photoClient)
+		if err != nil {
+			fmt.Println(err.Error())
+			// continue
+		}
 		result := AttachMediaUpload(upload, photoService)
 		fmt.Printf("(%d) %s - %s ", result.StatusCode, result.ID, result.Description)
 	}
