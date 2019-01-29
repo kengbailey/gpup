@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -20,6 +21,8 @@ const (
 	uploadURL  string = "https://photoslibrary.googleapis.com/"
 	apiVersion string = "v1"
 )
+
+var fileTypes = []string{".mp4", ".mov", ".m4v", ".avi", ".mkv", ".jpg", ".png", ".webp"}
 
 // authenticateClient ...
 func authenticateClient(clientID, clientSecret string) *http.Client {
@@ -52,6 +55,16 @@ func authenticateClient(clientID, clientSecret string) *http.Client {
 	return config.Client(ctx, accesstoken)
 }
 
+// isMedia ...
+func isMedia(str string) bool {
+	for _, x := range fileTypes {
+		if strings.Contains(str, x) {
+			return true
+		}
+	}
+	return false
+}
+
 // findMedia ...
 func findMedia() (media []string, err error) {
 	thisDir, err := os.Getwd()
@@ -59,8 +72,7 @@ func findMedia() (media []string, err error) {
 		return
 	}
 	err = filepath.Walk(thisDir, func(path string, info os.FileInfo, err error) error {
-		if !info.IsDir() {
-			// TODO: restrict file types; path.Ext() --> https://support.google.com/photos/thread/245420?hl=en
+		if !info.IsDir() && isMedia(info.Name()) {
 			media = append(media, path)
 		}
 		return nil
