@@ -24,6 +24,12 @@ const (
 
 var fileTypes = []string{".mp4", ".mov", ".m4v", ".avi", ".mkv", ".jpg", ".png", ".webp"}
 
+// MediaUpload ...
+type MediaUpload struct {
+	name        string
+	uploadToken string
+}
+
 // authenticateClient ...
 func authenticateClient(clientID, clientSecret string) *http.Client {
 	// create new oauth2 config
@@ -83,6 +89,54 @@ func findMedia() (media []string, err error) {
 	return
 }
 
+// uploadMediaFile ...
+func uploadMediaFile(file *os.File, photoClient *http.Client) MediaUpload {
+	// 1. upload file, get token
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/uploads", uploadURL, apiVersion), file)
+	if err != nil {
+		log.Fatal(err)
+	}
+	req.Header.Add("Content-type", " application/octet-stream")
+	req.Header.Add("X-Goog-Upload-File-Name", path.Base(file.Name()))
+	req.Header.Add("X-Goog-Upload-Protocol", "raw")
+	out, err := photoClient.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer out.Body.Close()
+
+	out2, err := ioutil.ReadAll(out.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return MediaUpload{
+		name:        path.Base(file.Name()),
+		uploadToken: string(out2),
+	}
+}
+
+// attachMediaUpload ...
+func attachMediaUpload(item MediaUpload, photoService *photoslibrary.Service) {
+	batch := photoService.MediaItems.BatchCreate(&photoslibrary.BatchCreateMediaItemsRequest{
+		NewMediaItems: []*photoslibrary.NewMediaItem{
+			&photoslibrary.NewMediaItem{
+				Description:     item.name,
+				SimpleMediaItem: &photoslibrary.SimpleMediaItem{UploadToken: item.uploadToken},
+			},
+		},
+	})
+	response, err := batch.Do()
+	if err != nil {
+		log.Fatal(err)
+	}
+	// TODO: status code error checking
+	// TODO: print new media item results
+	fmt.Println(response.HTTPStatusCode)
+	for _, x := range response.NewMediaItemResults {
+		fmt.Printf("Added %s as %s", x.MediaItem.Description, x.MediaItem.Id)
+	}
+}
+
 func main() {
 	fmt.Println("Starting... ")
 
@@ -108,52 +162,17 @@ func main() {
 	// TODO: do this concurrently; multiple (1) w/ single (2)
 	for _, filePath := range mediaFiles {
 		// 0. prep file
-		fileName := path.Base(filePath)
 		file, err := os.Open(filePath)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer file.Close()
 
-		// 1. upload file, get token
-		req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/uploads", uploadURL, apiVersion), file)
-		if err != nil {
-			log.Fatal(err)
-		}
-		req.Header.Add("Content-type", " application/octet-stream")
-		req.Header.Add("X-Goog-Upload-File-Name", fileName)
-		req.Header.Add("X-Goog-Upload-Protocol", "raw")
-		out, err := photoClient.Do(req)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer out.Body.Close()
-
-		out2, err := ioutil.ReadAll(out.Body)
-		if err != nil {
-			log.Fatal(err)
-		}
-		token := string(out2)
+		// // 1. upload file, get token
+		item := uploadMediaFile(file, photoClient)
 
 		// 2. attach file to library via token
-		batch := photoService.MediaItems.BatchCreate(&photoslibrary.BatchCreateMediaItemsRequest{
-			NewMediaItems: []*photoslibrary.NewMediaItem{
-				&photoslibrary.NewMediaItem{
-					Description:     fileName,
-					SimpleMediaItem: &photoslibrary.SimpleMediaItem{UploadToken: token},
-				},
-			},
-		})
-		response, err := batch.Do()
-		if err != nil {
-			log.Fatal(err)
-		}
-		// TODO: status code error checking
-		// TODO: print new media item results
-		fmt.Println(response.HTTPStatusCode)
-		// for _, x := range response.NewMediaItemResults {
-		// 	fmt.Printf("Added %s as %s", x.MediaItem.Description, x.MediaItem.Id)
-		// }
+		attachMediaUpload(item, photoService)
 
 	}
 }
