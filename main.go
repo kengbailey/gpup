@@ -18,15 +18,10 @@ import (
 	photoslibrary "google.golang.org/api/photoslibrary/v1"
 )
 
-var jobs = make(chan *os.File, 10)
-
-// kickOffJobs ...
-func kickOffJobs(mediaFiles []*os.File) {
-	for _, file := range mediaFiles {
-		jobs <- file
-	}
-	close(jobs)
-}
+const (
+	uploadURL  string = "https://photoslibrary.googleapis.com/"
+	apiVersion string = "v1"
+)
 
 var fileTypes = []string{".mp4", ".mov", ".m4v", ".avi", ".mkv", ".jpg", ".png", ".webp", ".gif"}
 
@@ -41,6 +36,64 @@ type MediaResult struct {
 	ID          string
 	Description string
 	StatusCode  int
+}
+
+// IsMedia ...
+func isMedia(str string) bool {
+	for _, x := range fileTypes {
+		if strings.Contains(str, x) {
+			return true
+		}
+	}
+	return false
+}
+
+// FindMedia ...
+func findMedia() (media []*os.File, err error) {
+	thisDir, err := os.Getwd()
+	if err != nil {
+		return
+	}
+
+	var files []string
+	err = filepath.Walk(thisDir, func(path string, info os.FileInfo, err error) error {
+		if !info.IsDir() && isMedia(info.Name()) {
+
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return
+	}
+
+	for _, filePath := range files {
+		file, err := os.Open(filePath)
+		if err != nil {
+			return nil, err
+		}
+		media = append(media, file)
+	}
+
+	return
+}
+
+// NewPhotoService ...
+func NewPhotoService(client *http.Client) (*photoslibrary.Service, error) {
+	photoService, err := photoslibrary.New(client)
+	if err != nil {
+		return nil, err
+	}
+	return photoService, nil
+}
+
+// NewAuthenticationClient ...
+func NewAuthenticationClient(clientID string, clientSecret string) (*http.Client, error) {
+	photoClient, err := AuthenticateClient(clientID, clientSecret)
+	if err != nil {
+		return nil, err
+	}
+	return photoClient, nil
 }
 
 // UploadMediaFile ...
@@ -73,7 +126,7 @@ func UploadMediaFile(file *os.File, photoClient *http.Client) (upload MediaUploa
 }
 
 // AttachMediaUpload ...
-func AttachMediaUpload(item MediaUpload, photoService *photoslibrary.Service) MediaResult {
+func AttachMediaUpload(item MediaUpload, photoService *photoslibrary.Service) (result MediaResult, err error) {
 	batch := photoService.MediaItems.BatchCreate(&photoslibrary.BatchCreateMediaItemsRequest{
 		NewMediaItems: []*photoslibrary.NewMediaItem{
 			&photoslibrary.NewMediaItem{
@@ -82,76 +135,24 @@ func AttachMediaUpload(item MediaUpload, photoService *photoslibrary.Service) Me
 			},
 		},
 	})
+
 	response, err := batch.Do()
 	if err != nil {
-		log.Fatal(err)
+		return
 	}
 	fmt.Println("File attached: " + response.NewMediaItemResults[0].MediaItem.Id)
-	return MediaResult{
+
+	result = MediaResult{
 		Description: response.NewMediaItemResults[0].MediaItem.Description,
 		StatusCode:  response.NewMediaItemResults[0].MediaItem.HTTPStatusCode,
 		ID:          response.NewMediaItemResults[0].MediaItem.Id,
 	}
-}
 
-// IsMedia ...
-func isMedia(str string) bool {
-	for _, x := range fileTypes {
-		if strings.Contains(str, x) {
-			return true
-		}
-	}
-	return false
-}
-
-// FindMedia ...
-func FindMedia() (media []*os.File, err error) {
-	thisDir, err := os.Getwd()
-	if err != nil {
-		return
-	}
-	var files []string
-	err = filepath.Walk(thisDir, func(path string, info os.FileInfo, err error) error {
-		if !info.IsDir() && isMedia(info.Name()) {
-
-			files = append(files, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return
-	}
-	for _, filePath := range files {
-		file, err := os.Open(filePath)
-		if err != nil {
-			log.Fatal(err)
-		}
-		media = append(media, file)
-	}
 	return
 }
 
-// worker ...
-func worker(wg *sync.WaitGroup, photoClient *http.Client, photoService *photoslibrary.Service) {
-	for file := range jobs {
-		upload, err := UploadMediaFile(file, photoClient)
-		if err != nil {
-			fmt.Println(err.Error())
-			// continue
-		}
-		result := AttachMediaUpload(upload, photoService)
-		fmt.Printf("(%d) %s - %s ", result.StatusCode, result.ID, result.Description)
-	}
-	wg.Done()
-}
-
-const (
-	uploadURL  string = "https://photoslibrary.googleapis.com/"
-	apiVersion string = "v1"
-)
-
 // AuthenticateClient ...
-func AuthenticateClient(clientID, clientSecret string) *http.Client {
+func AuthenticateClient(clientID, clientSecret string) (*http.Client, error) {
 	// create new oauth2 config
 	config := &oauth2.Config{
 		ClientID:     clientID,
@@ -171,15 +172,47 @@ func AuthenticateClient(clientID, clientSecret string) *http.Client {
 	fmt.Print("Enter code: ")
 	_, err := fmt.Scanln(&authCode)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	ctx := context.Background()
 	accesstoken, err := config.Exchange(ctx, authCode)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	return config.Client(ctx, accesstoken)
+
+	return config.Client(ctx, accesstoken), nil
 }
+
+var jobs = make(chan *os.File, 10)
+
+// kickOffJobs ...
+func kickOffJobs(mediaFiles []*os.File) {
+	for _, file := range mediaFiles {
+		jobs <- file
+	}
+	close(jobs)
+}
+
+// worker ...
+func worker(wg *sync.WaitGroup, photoClient *http.Client, photoService *photoslibrary.Service) {
+	for file := range jobs {
+		upload, err := UploadMediaFile(file, photoClient)
+		if err != nil {
+			fmt.Println(err.Error())
+			// continue
+			// TODO: handle better
+		}
+		result, err := AttachMediaUpload(upload, photoService)
+		if err != nil {
+			fmt.Println(err.Error())
+			// continue
+			// TODO: handle better
+		}
+		fmt.Printf("(%d) %s - %s ", result.StatusCode, result.ID, result.Description)
+	}
+	wg.Done()
+}
+
 func main() {
 	fmt.Println("Starting... ")
 
@@ -187,16 +220,20 @@ func main() {
 	// TODO: check for args; print message if empty
 	clientID := os.Getenv("GPHOTOS_CLIENTID")
 	clientSecret := os.Getenv("GPHOTOS_CLIENTSECRET")
-	photoClient := AuthenticateClient(clientID, clientSecret)
+
+	photoClient, err := NewAuthenticationClient(clientID, clientSecret)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// create new photo service
-	photoService, err := photoslibrary.New(photoClient)
+	photoService, err := NewPhotoService(photoClient)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// find media
-	mediaFiles, err := FindMedia()
+	mediaFiles, err := findMedia()
 	if err != nil {
 		log.Fatal(err)
 	}
