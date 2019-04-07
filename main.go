@@ -260,7 +260,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	os.Exit(1)
+
 	// find media
 	mediaFiles, err := findMedia()
 	if err != nil {
