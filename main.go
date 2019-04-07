@@ -12,7 +12,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -50,33 +49,24 @@ func isMedia(str string) bool {
 }
 
 // FindMedia finds all media items in the current directory.
-func findMedia() (media []*os.File, err error) {
+func findMedia() ([]string, error) {
 	thisDir, err := os.Getwd()
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	var files []string
 	err = filepath.Walk(thisDir, func(path string, info os.FileInfo, err error) error {
 		if !info.IsDir() && isMedia(info.Name()) {
-
 			files = append(files, path)
 		}
 		return nil
 	})
 	if err != nil {
-		return
+		return nil, err
 	}
 
-	for _, filePath := range files {
-		file, err := os.Open(filePath)
-		if err != nil {
-			return nil, err
-		}
-		media = append(media, file)
-	}
-
-	return
+	return files, nil
 }
 
 // NewPhotoService creates a new google photos client to perform photo uploads.
@@ -98,29 +88,34 @@ func NewAuthenticationClient(clientID string, clientSecret string) (*http.Client
 }
 
 // UploadMediaFile uploads a media file.
-func UploadMediaFile(file *os.File, photoClient *http.Client) (upload MediaUpload, err error) {
-	// 1. upload file, get token
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/uploads", uploadURL, apiVersion), file)
+func UploadMediaFile(file string, photoClient *http.Client) (upload MediaUpload, err error) {
+	f, err := os.Open(file)
 	if err != nil {
-		return upload, fmt.Errorf("Failed to create new POST Request for File: %s --> %s", file.Name(), err.Error())
+		return
+	}
+	defer f.Close()
+
+	// 1. upload file, get token
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/uploads", uploadURL, apiVersion), f)
+	if err != nil {
+		return upload, fmt.Errorf("Failed to create new POST Request for File: %s --> %s", f.Name(), err.Error())
 	}
 	req.Header.Add("Content-type", " application/octet-stream")
-	req.Header.Add("X-Goog-Upload-File-Name", path.Base(file.Name()))
+	req.Header.Add("X-Goog-Upload-File-Name", path.Base(f.Name()))
 	req.Header.Add("X-Goog-Upload-Protocol", "raw")
 	out, err := photoClient.Do(req)
 	if err != nil {
-		return upload, fmt.Errorf("Failed to POST File: %s --> %s", file.Name(), err.Error())
+		return upload, fmt.Errorf("Failed to POST File: %s --> %s", f.Name(), err.Error())
 	}
 	defer out.Body.Close()
-	defer file.Close()
 
 	out2, err := ioutil.ReadAll(out.Body)
 	if err != nil {
-		return upload, fmt.Errorf("Failed to read POST response body for file: %s --> %s", file.Name(), err.Error())
+		return upload, fmt.Errorf("Failed to read POST response body for file: %s --> %s", f.Name(), err.Error())
 	}
-	fmt.Println("File uploaded: " + file.Name())
+	fmt.Println("File uploaded: " + f.Name())
 	upload = MediaUpload{
-		name:        path.Base(file.Name()),
+		name:        path.Base(f.Name()),
 		uploadToken: string(out2),
 	}
 	return
@@ -228,24 +223,24 @@ func kickOffJobs(mediaFiles []*os.File) {
 }
 
 // worker reads from jobs channel to upload files.
-func worker(wg *sync.WaitGroup, photoClient *http.Client, photoService *photoslibrary.Service) {
-	for file := range jobs {
-		upload, err := UploadMediaFile(file, photoClient)
-		if err != nil {
-			fmt.Println(err.Error())
-			// continue
-			// TODO: handle better
-		}
-		result, err := AttachMediaUpload(upload, photoService)
-		if err != nil {
-			fmt.Println(err.Error())
-			// continue
-			// TODO: handle better
-		}
-		fmt.Printf("(%d) %s - %s ", result.StatusCode, result.ID, result.Description)
-	}
-	wg.Done()
-}
+// func worker(wg *sync.WaitGroup, photoClient *http.Client, photoService *photoslibrary.Service) {
+// 	for file := range jobs {
+// 		upload, err := UploadMediaFile(file, photoClient)
+// 		if err != nil {
+// 			fmt.Println(err.Error())
+// 			// continue
+// 			// TODO: handle better
+// 		}
+// 		result, err := AttachMediaUpload(upload, photoService)
+// 		if err != nil {
+// 			fmt.Println(err.Error())
+// 			// continue
+// 			// TODO: handle better
+// 		}
+// 		fmt.Printf("(%d) %s - %s ", result.StatusCode, result.ID, result.Description)
+// 	}
+// 	wg.Done()
+// }
 
 func main() {
 	fmt.Println("Starting... ")
@@ -265,7 +260,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
+	os.Exit(1)
 	// find media
 	mediaFiles, err := findMedia()
 	if err != nil {
