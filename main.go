@@ -38,7 +38,7 @@ type MediaResult struct {
 	StatusCode  int
 }
 
-// IsMedia ...
+// IsMedia checks if a file is an uploadable media item.
 func isMedia(str string) bool {
 	for _, x := range fileTypes {
 		if strings.Contains(str, x) {
@@ -48,7 +48,7 @@ func isMedia(str string) bool {
 	return false
 }
 
-// FindMedia ...
+// FindMedia finds all media items in the current directory.
 func findMedia() (media []*os.File, err error) {
 	thisDir, err := os.Getwd()
 	if err != nil {
@@ -78,7 +78,7 @@ func findMedia() (media []*os.File, err error) {
 	return
 }
 
-// NewPhotoService ...
+// NewPhotoService creates a new google photos client to perform photo uploads.
 func NewPhotoService(client *http.Client) (*photoslibrary.Service, error) {
 	photoService, err := photoslibrary.New(client)
 	if err != nil {
@@ -87,7 +87,7 @@ func NewPhotoService(client *http.Client) (*photoslibrary.Service, error) {
 	return photoService, nil
 }
 
-// NewAuthenticationClient ...
+// NewAuthenticationClient creates a new http client to facilitate photo uploads.
 func NewAuthenticationClient(clientID string, clientSecret string) (*http.Client, error) {
 	photoClient, err := AuthenticateClient(clientID, clientSecret)
 	if err != nil {
@@ -96,7 +96,7 @@ func NewAuthenticationClient(clientID string, clientSecret string) (*http.Client
 	return photoClient, nil
 }
 
-// UploadMediaFile ...
+// UploadMediaFile uploads a media file.
 func UploadMediaFile(file *os.File, photoClient *http.Client) (upload MediaUpload, err error) {
 	// 1. upload file, get token
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/uploads", uploadURL, apiVersion), file)
@@ -125,7 +125,7 @@ func UploadMediaFile(file *os.File, photoClient *http.Client) (upload MediaUploa
 	return
 }
 
-// AttachMediaUpload ...
+// AttachMediaUpload finishes an upload by attaching uploaded data to new library item.
 func AttachMediaUpload(item MediaUpload, photoService *photoslibrary.Service) (result MediaResult, err error) {
 	batch := photoService.MediaItems.BatchCreate(&photoslibrary.BatchCreateMediaItemsRequest{
 		NewMediaItems: []*photoslibrary.NewMediaItem{
@@ -151,7 +151,7 @@ func AttachMediaUpload(item MediaUpload, photoService *photoslibrary.Service) (r
 	return
 }
 
-// AuthenticateClient ...
+// AuthenticateClient creates an authenticated client for photo upload.
 func AuthenticateClient(clientID, clientSecret string) (*http.Client, error) {
 	// create new oauth2 config
 	config := &oauth2.Config{
@@ -185,7 +185,7 @@ func AuthenticateClient(clientID, clientSecret string) (*http.Client, error) {
 
 var jobs = make(chan *os.File, 10)
 
-// kickOffJobs ...
+// kickOffJobs queues files for upload by sending to jobs channel.
 func kickOffJobs(mediaFiles []*os.File) {
 	for _, file := range mediaFiles {
 		jobs <- file
@@ -193,7 +193,7 @@ func kickOffJobs(mediaFiles []*os.File) {
 	close(jobs)
 }
 
-// worker ...
+// worker reads from jobs channel to upload files.
 func worker(wg *sync.WaitGroup, photoClient *http.Client, photoService *photoslibrary.Service) {
 	for file := range jobs {
 		upload, err := UploadMediaFile(file, photoClient)
@@ -240,14 +240,32 @@ func main() {
 	fmt.Printf("%d files to upload!\n", len(mediaFiles))
 
 	// kick off jobs
-	go kickOffJobs(mediaFiles)
+	// go kickOffJobs(mediaFiles)
 
 	// kick off workers
-	numWorkers := 10
-	var wg sync.WaitGroup
-	wg.Add(numWorkers)
-	for i := 0; i < numWorkers; i++ {
-		go worker(&wg, photoClient, photoService)
+	// numWorkers := 10
+	// var wg sync.WaitGroup
+	// wg.Add(numWorkers)
+	// for i := 0; i < numWorkers; i++ {
+	// 	go worker(&wg, photoClient, photoService)
+	// }
+	// wg.Wait()
+
+	for i, file := range mediaFiles {
+		upload, err := UploadMediaFile(file, photoClient)
+		if err != nil {
+			log.Fatalf("Failed to upload media: %v", err)
+		}
+		result, err := AttachMediaUpload(upload, photoService)
+		if err != nil {
+			log.Fatalf("Failed to attach media: %v", err)
+		}
+		fmt.Printf("#%d (%d) %s ", i, result.StatusCode, result.Description)
 	}
-	wg.Wait()
+
+}
+
+// TODO: enable retry functionality: https://github.com/nmrshll/google-photos-api-client-go/blob/master/lib-gphotos/client.go
+func uploadFiles() {
+
 }
