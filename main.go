@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -153,7 +154,9 @@ func AttachMediaUpload(item MediaUpload, photoService *photoslibrary.Service) (r
 
 // AuthenticateClient creates an authenticated client for photo upload.
 func AuthenticateClient(clientID, clientSecret string) (*http.Client, error) {
-	// create new oauth2 config
+	// setup
+	token := &oauth2.Token{}
+	ctx := context.Background()
 	config := &oauth2.Config{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
@@ -162,25 +165,56 @@ func AuthenticateClient(clientID, clientSecret string) (*http.Client, error) {
 		RedirectURL:  "urn:ietf:wg:oauth:2.0:oob",
 	}
 
-	// prompt user to authenticate
-	stateToken := fmt.Sprintf("%x", rand.Uint64())
-	authCodeURL := config.AuthCodeURL(stateToken)
-	fmt.Printf("Authenticate --> %s\n\n", authCodeURL)
+	// check for token file
+	tokenFile, tBool := os.LookupEnv("GPHOTOS_TOKENJSON")
+	if !tBool {
+		// prompt user to authenticate
+		stateToken := fmt.Sprintf("%x", rand.Uint64())
+		authCodeURL := config.AuthCodeURL(stateToken)
+		fmt.Printf("Authenticate --> %s\n\n", authCodeURL)
 
-	// verify code and get http.Client
-	var authCode string
-	fmt.Print("Enter code: ")
-	_, err := fmt.Scanln(&authCode)
-	if err != nil {
-		return nil, err
-	}
-	ctx := context.Background()
-	accesstoken, err := config.Exchange(ctx, authCode)
-	if err != nil {
-		return nil, err
+		// verify code and get http.Client
+		var authCode string
+		fmt.Print("Enter code: ")
+		_, err := fmt.Scanln(&authCode)
+		if err != nil {
+			log.Fatalf("Failed to read entered code: %v", err)
+		}
+
+		token, err = config.Exchange(ctx, authCode)
+		if err != nil {
+			log.Fatalf("Failed to authorize new token: %v", err)
+		}
+		saveToken(token)
+
+	} else {
+		getTokenFromFile(token, tokenFile)
 	}
 
-	return config.Client(ctx, accesstoken), nil
+	return config.Client(ctx, token), nil
+}
+
+func getTokenFromFile(token *oauth2.Token, tokenFile string) error {
+	file, err := os.Open(tokenFile)
+	if err != nil {
+		log.Fatalf("Failed to open token file: %v", err)
+	}
+	defer file.Close()
+	json.NewDecoder(file).Decode(token)
+	return nil
+}
+
+// saveTokens saves token to current directory as token.json"
+func saveToken(token *oauth2.Token) {
+	file, err := os.Create("token.json")
+	if err != nil {
+		log.Fatalf("Failed to create new token file: %v", err)
+	}
+	defer file.Close()
+	err = json.NewEncoder(file).Encode(token)
+	if err != nil {
+		log.Fatalf("Failed to save to new token file: %v", err)
+	}
 }
 
 var jobs = make(chan *os.File, 10)
