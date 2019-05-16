@@ -8,9 +8,12 @@ Currently supports the following file types.
 
 ## Getting Started
 
-Visit GPhotos API [authentication page](webhttps://developers.google.com/photos/library/guides/authentication-authorization) and follow instructions for "Authorizing requests with OAuth 2.0". Activate the Photos LIbrary API within the Google API Console and download the json credentials associated with your new client. 
+Visit GPhotos API [authentication page](https://developers.google.com/photos/library/guides/authentication-authorization/) and follow instructions for "Authorizing requests with OAuth 2.0". Activate the Photos LIbrary API within the Google API Console and download the json credentials associated with your new client. 
 
 Save this file to disk and create an environment variable named GPHOTOS_TOKENJSON, which holds the path to the json file. 
+```
+export GPHOTOS_TOKENJSON=/path/to/json/file.json
+```
 
 Clone repository
 ```
