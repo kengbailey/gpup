@@ -293,8 +293,3 @@ func main() {
 	}
 
 }
-
-// TODO: enable retry functionality: https://github.com/nmrshll/google-photos-api-client-go/blob/master/lib-gphotos/client.go
-func uploadFiles() {
-
-}
