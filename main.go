@@ -212,36 +212,6 @@ func saveToken(token *oauth2.Token) {
 	}
 }
 
-var jobs = make(chan *os.File, 10)
-
-// kickOffJobs queues files for upload by sending to jobs channel.
-func kickOffJobs(mediaFiles []*os.File) {
-	for _, file := range mediaFiles {
-		jobs <- file
-	}
-	close(jobs)
-}
-
-// worker reads from jobs channel to upload files.
-// func worker(wg *sync.WaitGroup, photoClient *http.Client, photoService *photoslibrary.Service) {
-// 	for file := range jobs {
-// 		upload, err := UploadMediaFile(file, photoClient)
-// 		if err != nil {
-// 			fmt.Println(err.Error())
-// 			// continue
-// 			// TODO: handle better
-// 		}
-// 		result, err := AttachMediaUpload(upload, photoService)
-// 		if err != nil {
-// 			fmt.Println(err.Error())
-// 			// continue
-// 			// TODO: handle better
-// 		}
-// 		fmt.Printf("(%d) %s - %s ", result.StatusCode, result.ID, result.Description)
-// 	}
-// 	wg.Done()
-// }
-
 func main() {
 	fmt.Println("Starting... ")
 
@@ -268,28 +238,31 @@ func main() {
 	}
 	fmt.Printf("%d files to upload!\n", len(mediaFiles))
 
-	// kick off jobs
-	// go kickOffJobs(mediaFiles)
-
-	// kick off workers
-	// numWorkers := 10
-	// var wg sync.WaitGroup
-	// wg.Add(numWorkers)
-	// for i := 0; i < numWorkers; i++ {
-	// 	go worker(&wg, photoClient, photoService)
-	// }
-	// wg.Wait()
-
 	for i, file := range mediaFiles {
 		upload, err := UploadMediaFile(file, photoClient)
 		if err != nil {
 			log.Fatalf("Failed to upload media: %v", err)
 		}
-		result, err := AttachMediaUpload(upload, photoService)
-		if err != nil {
-			log.Fatalf("Failed to attach media: %v", err)
+
+		retryCount := 0
+		retry := true
+		for retry == true && retryCount < 4 {
+
+			result, err := AttachMediaUpload(upload, photoService)
+			if err != nil {
+				// failed upload
+				log.Printf("Failed to attach media! Retrying %d", retryCount)
+				retryCount++
+			} else {
+				// successful upload
+				retry = false
+				fmt.Printf("#%d (%d) %s ", i, result.StatusCode, result.Description)
+			}
 		}
-		fmt.Printf("#%d (%d) %s ", i, result.StatusCode, result.Description)
+		if retryCount > 4 {
+			log.Printf("MAX RETRIES!! Failed to upload file: %s", file)
+		}
+
 	}
 
 }
