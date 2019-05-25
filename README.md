@@ -36,8 +36,7 @@ export GPHOTOS_TOKENJSON=/path/to/json/file.json
 ```
 
 ### Status
-
-Working! Log output needs to be improved. I'd like to add concurrent uploads sometime in the future. 
+Working! Concurrent uploads would speed things up... 
 
 
 
