@@ -25,20 +25,13 @@ const (
 
 var fileTypes = []string{".mp4", ".mov", ".m4v", ".avi", ".mkv", ".jpg", ".png", ".webp", ".gif"}
 
-// MediaUpload ...
+// MediaUpload represents a successfully uploaded media item.
 type MediaUpload struct {
 	name        string
 	uploadToken string
 }
 
-// MediaResult ...
-type MediaResult struct {
-	ID          string
-	Description string
-	StatusCode  int
-}
-
-// IsMedia checks if a file is an uploadable media item.
+// isMedia checks if a file is an uploadable media item.
 func isMedia(str string) bool {
 	for _, x := range fileTypes {
 		if strings.Contains(str, x) {
@@ -113,7 +106,6 @@ func UploadMediaFile(file string, photoClient *http.Client) (upload MediaUpload,
 	if err != nil {
 		return upload, fmt.Errorf("Failed to read POST response body for file: %s --> %s", f.Name(), err.Error())
 	}
-	fmt.Println("File uploaded: " + f.Name())
 	upload = MediaUpload{
 		name:        path.Base(f.Name()),
 		uploadToken: string(out2),
@@ -122,7 +114,7 @@ func UploadMediaFile(file string, photoClient *http.Client) (upload MediaUpload,
 }
 
 // AttachMediaUpload finishes an upload by attaching uploaded data to new library item.
-func AttachMediaUpload(item MediaUpload, photoService *photoslibrary.Service) (result MediaResult, err error) {
+func AttachMediaUpload(item MediaUpload, photoService *photoslibrary.Service) (err error) {
 	batch := photoService.MediaItems.BatchCreate(&photoslibrary.BatchCreateMediaItemsRequest{
 		NewMediaItems: []*photoslibrary.NewMediaItem{
 			&photoslibrary.NewMediaItem{
@@ -131,27 +123,19 @@ func AttachMediaUpload(item MediaUpload, photoService *photoslibrary.Service) (r
 			},
 		},
 	})
-
-	response, err := batch.Do()
+	_, err = batch.Do()
 	if err != nil {
 		return
 	}
-	fmt.Println("File attached: " + response.NewMediaItemResults[0].MediaItem.Id)
-
-	result = MediaResult{
-		Description: response.NewMediaItemResults[0].MediaItem.Description,
-		StatusCode:  response.NewMediaItemResults[0].MediaItem.HTTPStatusCode,
-		ID:          response.NewMediaItemResults[0].MediaItem.Id,
-	}
-
 	return
 }
 
 // AuthenticateClient creates an authenticated client for photo upload.
 func AuthenticateClient(clientID, clientSecret string) (*http.Client, error) {
+
 	// setup
 	token := &oauth2.Token{}
-	ctx := context.Background()
+	var err error
 	config := &oauth2.Config{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
@@ -160,60 +144,95 @@ func AuthenticateClient(clientID, clientSecret string) (*http.Client, error) {
 		RedirectURL:  "urn:ietf:wg:oauth:2.0:oob",
 	}
 
-	// check for token file
-	tokenFile, tBool := os.LookupEnv("GPHOTOS_TOKENJSON")
+	// check for token file; if exists load and use
+	_, tBool := os.LookupEnv("GPHOTOS_TOKENJSON")
 	if !tBool {
-		// prompt user to authenticate
-		stateToken := fmt.Sprintf("%x", rand.Uint64())
-		authCodeURL := config.AuthCodeURL(stateToken)
-		fmt.Printf("Authenticate --> %s\n\n", authCodeURL)
-
-		// verify code and get http.Client
-		var authCode string
-		fmt.Print("Enter code: ")
-		_, err := fmt.Scanln(&authCode)
+		token, err = linkAuthentication(clientID, clientSecret)
 		if err != nil {
-			log.Fatalf("Failed to read entered code: %v", err)
+			return nil, err
 		}
-
-		token, err = config.Exchange(ctx, authCode)
-		if err != nil {
-			log.Fatalf("Failed to authorize new token: %v", err)
-		}
-		saveToken(token)
-
 	} else {
-		getTokenFromFile(token, tokenFile)
+
+		tokenFile := os.Getenv("GPHOTOS_TOKENJSON")
+		token, err = getTokenFromFile(tokenFile)
+		if err != nil {
+			token, err = linkAuthentication(clientID, clientSecret)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
-	return config.Client(ctx, token), nil
+	return config.Client(context.Background(), token), nil
 }
 
-func getTokenFromFile(token *oauth2.Token, tokenFile string) error {
+// linkAuthentication performs authentication via link when token json file not found
+func linkAuthentication(clientID, clientSecret string) (*oauth2.Token, error) {
+
+	// setup
+	token := &oauth2.Token{}
+	var err error
+	config := &oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		Endpoint:     google.Endpoint,
+		Scopes:       []string{photoslibrary.PhotoslibraryScope},
+		RedirectURL:  "urn:ietf:wg:oauth:2.0:oob",
+	}
+	ctx := context.Background()
+
+	// prompt user to authenticate
+	stateToken := fmt.Sprintf("%x", rand.Uint64())
+	authCodeURL := config.AuthCodeURL(stateToken)
+	fmt.Printf("Authenticate --> %s\n\n", authCodeURL)
+
+	// verify code and get http.Client
+	var authCode string
+	fmt.Print("Enter code: ")
+	_, err = fmt.Scanln(&authCode)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read entered code: %v", err)
+	}
+
+	token, err = config.Exchange(ctx, authCode)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to authorize new token: %v", err)
+	}
+	err = saveToken(token) // TODO: alert user that token file isbeing saved. Tell tosave to new environment variable
+	if err != nil {
+		return nil, err
+	}
+	return token, nil
+}
+
+// getTokenFromFile retrieves the authentication token from a saved json file
+func getTokenFromFile(tokenFile string) (*oauth2.Token, error) {
+	token := &oauth2.Token{}
 	file, err := os.Open(tokenFile)
 	if err != nil {
-		log.Fatalf("Failed to open token file: %v", err)
+		return token, fmt.Errorf("Failed to open token file: %v", err)
 	}
 	defer file.Close()
 	json.NewDecoder(file).Decode(token)
-	return nil
+	return token, nil
 }
 
-// saveTokens saves token to current directory as token.json"
-func saveToken(token *oauth2.Token) {
+// saveTokens saves token to current directory as token.json
+func saveToken(token *oauth2.Token) error {
 	file, err := os.Create("token.json")
 	if err != nil {
-		log.Fatalf("Failed to create new token file: %v", err)
+		return fmt.Errorf("Failed to create new token file: %v", err)
 	}
 	defer file.Close()
 	err = json.NewEncoder(file).Encode(token)
 	if err != nil {
-		log.Fatalf("Failed to save to new token file: %v", err)
+		return fmt.Errorf("Failed to save to new token file: %v", err)
 	}
+	return nil
 }
 
 func main() {
-	fmt.Println("Starting... ")
+	fmt.Print("Starting... ")
 
 	// authenticate
 	// TODO: check for args; print message if empty
@@ -239,28 +258,31 @@ func main() {
 	fmt.Printf("%d files to upload!\n", len(mediaFiles))
 
 	for i, file := range mediaFiles {
+		fmt.Printf("%d - %s... ", i+1, filepath.Base(file))
 		upload, err := UploadMediaFile(file, photoClient)
 		if err != nil {
-			log.Fatalf("Failed to upload media: %v", err)
-		}
+			log.Printf("Failed to upload media: %v\n", err)
+		} else {
+			fmt.Print("uploaded... ")
 
-		retryCount := 0
-		retry := true
-		for retry == true && retryCount < 4 {
+			retryCount := 0
+			retry := true
+			for retry == true && retryCount < 4 {
 
-			result, err := AttachMediaUpload(upload, photoService)
-			if err != nil {
-				// failed upload
-				log.Printf("Failed to attach media! Retrying %d", retryCount)
-				retryCount++
-			} else {
-				// successful upload
-				retry = false
-				fmt.Printf("#%d (%d) %s ", i, result.StatusCode, result.Description)
+				err := AttachMediaUpload(upload, photoService)
+				if err != nil {
+					// failed upload
+					log.Printf("Failed to attach media! Retrying %d\n", retryCount)
+					retryCount++
+				} else {
+					// successful upload
+					retry = false
+					fmt.Print("finished attaching... DONE!\n")
+				}
 			}
-		}
-		if retryCount > 4 {
-			log.Printf("MAX RETRIES!! Failed to upload file: %s", file)
+			if retryCount > 4 {
+				log.Printf("MAX RETRIES!! Failed to upload file: %s\n", file)
+			}
 		}
 
 	}
